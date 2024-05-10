@@ -235,7 +235,23 @@ SELECT DISTINCT Product.maker
 ```
 
 ## 24
+Перечислите номера моделей любых типов, имеющих самую высокую цену по всей имеющейся в базе данных продукции. 
+```sql
+WITH mod_price AS (SELECT model, price
+                     FROM PC
+                    UNION 
+                   SELECT model, price
+                     FROM Printer
+                    UNION 
+                   SELECT model, price
+                     FROM Laptop
+                   )
 
+SELECT DISTINCT p.model
+  FROM mod_price AS p
+ WHERE price IN (SELECT MAX(price)
+                   FROM mod_price)
+```
 
 ## 25
 Найдите производителей принтеров, которые производят ПК с наименьшим объемом RAM и с самым быстрым процессором среди всех ПК, имеющих наименьший объем RAM. Вывести: Maker
@@ -391,7 +407,24 @@ SELECT DISTINCT c.class
 ```
 
 ## 37
+Найдите классы, в которые входит только один корабль из базы данных (учесть также корабли в Outcomes). 
+```sql
+SELECT class
+  FROM (SELECT c.class, s.name AS ship_name
+          FROM classes AS c
+         INNER JOIN ships AS s
+            ON c.class = s.class
 
+         UNION
+
+        SELECT c.class, o.ship AS ship_name
+          FROM classes AS c
+         INNER JOIN outcomes AS o
+            ON c.class = o.ship
+       ) AS t
+ GROUP BY class
+HAVING COUNT(ship_name) = 1
+```
 
 ## 38
 Найдите страны, имевшие когда-либо классы обычных боевых кораблей ('bb') и имевшие когда-либо классы крейсеров ('bc').
@@ -558,7 +591,26 @@ SELECT country, COUNT(o.ship)
 ```
 
 ## 48
+Найдите классы кораблей, в которых хотя бы один корабль был потоплен в сражении. 
+```sql
+SELECT class
+  FROM (SELECT class, result
+          FROM ships AS s
+         INNER JOIN outcomes AS o
+            ON s.name = o.ship
+         WHERE result = 'sunk'
 
+         UNION
+
+        SELECT class, result
+          FROM classes AS c
+         INNER JOIN outcomes AS o
+            ON c.class = o.ship
+         WHERE result = 'sunk'
+        ) AS t
+ GROUP BY class
+HAVING COUNT(result) > 0
+```
 
 ## 49
 Найдите названия кораблей с орудиями калибра 16 дюймов (учесть корабли из таблицы Outcomes).
@@ -591,6 +643,37 @@ SELECT DISTINCT battle
 ```
 
 ## 51
+Найдите названия кораблей, имеющих наибольшее число орудий среди всех имеющихся кораблей такого же водоизмещения (учесть корабли из таблицы Outcomes). 
+```sql
+SELECT name
+  FROM classes AS c
+ INNER JOIN (SELECT displacement, MAX(numguns) AS numguns
+               FROM (SELECT numguns, displacement
+                       FROM classes AS c
+                      INNER JOIN ships AS s
+                         ON c.class = s.class
+
+                      UNION
+
+                     SELECT numguns, displacement
+                       FROM classes AS c
+                      INNER JOIN outcomes AS o
+                         ON c.class = o.ship
+                     ) AS t
+              GROUP BY displacement
+           ) AS t1
+   ON c.numguns = t1.numguns
+  AND c.displacement = t1.displacement
+INNER JOIN (SELECT class, name
+              FROM ships
+             
+              UNION 
+    
+             SELECT ship AS class, ship AS name
+               FROM outcomes
+           ) AS t2
+   ON c.class = t2.class
+```
 
 ## 52
 
@@ -1018,4 +1101,127 @@ SELECT *
                      SELECT TOP 3 model
                        FROM Product 
                       ORDER BY model)
-``` 
+```
+
+## 91
+
+## 92
+Выбрать все белые квадраты, которые окрашивались только из баллончиков, пустых к настоящему времени. Вывести имя квадрата 
+```sql
+SELECT Q_NAME
+  FROM utQ
+ INNER JOIN (SELECT B_Q_ID
+               FROM utB
+              WHERE B_V_ID IN (SELECT B_V_ID
+                                 FROM utb
+                                GROUP BY B_V_ID
+                               HAVING SUM(B_VOL) = 255)
+              GROUP BY B_Q_ID
+             HAVING SUM(B_VOL) = 765
+             ) AS t1
+    ON utQ.Q_ID = t1.B_Q_ID
+```
+
+## 93
+Для каждой компании, перевозившей пассажиров, подсчитать время, которое провели в полете самолеты с пассажирами.
+Вывод: название компании, время в минутах. 
+```sql
+SELECT name, s_time
+  FROM (SELECT ID_comp, SUM(time) AS s_time
+          FROM (SELECT ID_comp,
+                       CASE
+                       WHEN DATEPART(hh, time_out) <= DATEPART(hh, time_in)
+                       THEN DATEDIFF(mi, time_out, time_in)
+                       ELSE DATEDIFF(mi, time_out, '1900-01-01 23:59:00') + 1 + DATEPART(hh, time_in) * 60 + DATEPART(mi, time_in)
+                        END AS time
+                 FROM trip
+                INNER JOIN (SELECT trip_no
+                              FROM pass_in_trip
+                             GROUP BY trip_no, date) AS t
+                   ON trip.trip_no = t.trip_no
+              ) AS t1
+        GROUP BY ID_comp
+      ) AS t2
+ INNER JOIN company AS c
+    ON c.ID_comp = t2.ID_comp
+```
+
+## 94
+Для семи последовательных дней, начиная от минимальной даты, когда из Ростова было совершено максимальное число рейсов, определить число рейсов из Ростова. Вывод: дата, количество рейсов 
+##### рабтает в postgree
+```sql
+SELECT dates, COUNT(DISTINCT trip_no)
+  FROM (SELECT generate_series(date, date + interval '6 day', '1 day') AS dates
+          FROM (SELECT date, COUNT(DISTINCT trip_no) AS cnt
+                  FROM pass_in_trip
+                 WHERE trip_no IN (SELECT trip_no
+                                     FROM trip
+                                    WHERE town_from = 'Rostov')
+                 GROUP BY date
+                 ORDER BY cnt DESC, date ASC 
+                 LIMIT 1
+                ) AS t
+       ) AS t1
+  LEFT JOIN (SELECT date, pt.trip_no
+               FROM pass_in_trip AS pt
+              INNER JOIN trip
+                 ON pt.trip_no = trip.trip_no
+                AND town_from = 'Rostov'
+             ) AS t2
+    ON t1.dates = t2.date
+ GROUP BY dates 
+```
+## 95
+На основании информации из таблицы Pass_in_Trip, для каждой авиакомпании определить:
+1) количество выполненных перелетов;
+2) число использованных типов самолетов;
+3) количество перевезенных различных пассажиров;
+4) общее число перевезенных компанией пассажиров.
+Вывод: Название компании, 1), 2), 3), 4).
+```sql
+SELECT name, cnt_all, cnt_plane, cnt_diff_psg, cnt_psg
+  FROM company
+ INNER JOIN (SELECT ID_comp, COUNT(pt.trip_no) AS cnt_all, COUNT(DISTINCT plane) AS cnt_plane, SUM(cnt) AS cnt_psg
+               FROM trip
+              INNER JOIN (SELECT trip_no, date, COUNT(ID_psg) AS cnt
+                            FROM pass_in_trip
+                           GROUP BY trip_no, date
+                         ) AS pt
+                 ON pt.trip_no = trip.trip_no
+              GROUP BY ID_comp
+             ) AS t1
+     ON company.ID_comp = t1.ID_comp
+ INNER JOIN (SELECT ID_comp, COUNT(DISTINCT ID_psg) AS cnt_diff_psg
+               FROM trip
+              INNER JOIN pass_in_trip AS pt
+                 ON trip.trip_no = pt.trip_no
+              GROUP BY ID_comp
+            ) AS t2
+   ON t1.ID_comp = t2.ID_comp
+```
+
+## 96
+При условии, что баллончики с красной краской использовались более одного раза, выбрать из них такие, которыми окрашены квадраты, имеющие голубую компоненту.Вывести название баллончика 
+```sql
+SELECT V_NAME
+  FROM utV
+ INNER JOIN (SELECT B_V_ID
+               FROM utV
+              INNER JOIN utB
+                 ON utB.B_V_ID = utV.V_ID
+                AND utV.V_COLOR = 'R'
+              GROUP BY B_V_ID
+             HAVING COUNT(B_V_ID) > 1) AS redbal
+    ON utV.V_ID = redbal.B_V_ID
+   AND B_V_ID IN (SELECT DISTINCT B_V_ID
+                    FROM utB
+                   INNER JOIN (SELECT B_Q_ID
+                                 FROM utB
+                                INNER JOIN utV
+                                   ON utB.B_V_ID = utV.V_ID
+                                  AND (V_COLOR = 'R' OR V_COLOR = 'B')
+                                GROUP BY B_Q_ID
+                               HAVING MAX(V_COLOR) <> MIN(V_COLOR)) AS t1
+                      ON utB.B_Q_ID = t1.B_Q_ID
+                   )
+```
